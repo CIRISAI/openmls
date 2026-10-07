@@ -1,6 +1,6 @@
 use hpke_rs_libcrux::HpkeLibcrux;
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Mutex;
 
 use openmls_traits::crypto::OpenMlsCrypto;
 use openmls_traits::types::{
@@ -8,7 +8,7 @@ use openmls_traits::types::{
     HpkeConfig, HpkeKdfType, HpkeKemType, HpkeKeyPair, KemOutput, SignatureScheme,
 };
 
-use rand::{rngs::OsRng, rngs::ReseedingRng, CryptoRng, RngCore};
+use rand::{rngs::OsRng, rngs::ReseedingRng, TryRngCore};
 use rand_chacha::ChaCha20Core;
 
 use tls_codec::SecretVLBytes;
@@ -88,7 +88,8 @@ impl OpenMlsCrypto for CryptoProvider {
         message: &[u8],
     ) -> Result<SecretVLBytes, CryptoError> {
         let alg = hash_alg(hash_type);
-        let out = libcrux_hmac::hmac(alg, key, message, None);
+        let mut out = vec![0u8; libcrux_hmac::tag_size(alg)];
+        libcrux_hmac::hmac(alg, key, message, &mut out);
         Ok(out.into())
     }
 
@@ -211,17 +212,29 @@ impl OpenMlsCrypto for CryptoProvider {
         let mut rng = self
             .rng
             .lock()
-            .map_err(|_| CryptoError::CryptoLibraryError)
-            .map(GuardedRng)?;
+            .map_err(|_| CryptoError::CryptoLibraryError)?;
 
-        libcrux_ed25519::generate_key_pair(&mut rng)
-            .map_err(|_| CryptoError::SigningError)
-            .map(|(signing_key, verification_key)| {
-                (
-                    signing_key.into_bytes().to_vec(),
-                    verification_key.into_bytes().to_vec(),
-                )
-            })
+        // libcrux-ed25519 >= 0.0.10 takes a rand 0.10 RNG; sample the secret
+        // here exactly as its `generate_key_pair` does (non-zero 32 bytes).
+        const LIMIT: usize = 100;
+        let mut sk = [0u8; 32];
+        let mut found = false;
+        for _ in 0..LIMIT {
+            rng.try_fill_bytes(&mut sk)
+                .map_err(|_| CryptoError::InsufficientRandomness)?;
+            if sk.iter().any(|&b| b != 0) {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Err(CryptoError::SigningError);
+        }
+
+        let mut pk = [0u8; 32];
+        libcrux_ed25519::secret_to_public(&mut pk, &sk);
+
+        Ok((sk.to_vec(), pk.to_vec()))
     }
 
     fn verify_signature(
@@ -435,21 +448,3 @@ fn aead_alg(alg_type: AeadType) -> libcrux_aead::Aead {
         AeadType::Aes256Gcm => libcrux_aead::Aead::AesGcm256,
     }
 }
-
-struct GuardedRng<'a, Rng: RngCore>(MutexGuard<'a, Rng>);
-
-impl<Rng: RngCore> RngCore for GuardedRng<'_, Rng> {
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
-    }
-
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        self.0.fill_bytes(dest)
-    }
-}
-
-impl<Rng: RngCore + CryptoRng> CryptoRng for GuardedRng<'_, Rng> {}

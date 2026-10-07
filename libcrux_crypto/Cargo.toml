@@ -1,6 +1,6 @@
 [package]
 name = "openmls_libcrux_crypto"
-version = "0.3.1"
+version = "0.3.1+ciris.1"
 edition = "2021"
 authors = ["OpenMLS Authors"]
 description = "A crypto backend for OpenMLS based on libcrux implementing openmls_traits."
@@ -10,23 +10,27 @@ repository = "https://github.com/openmls/openmls/tree/main/openmls_libcrux_crypt
 readme = "../README.md"
 
 [dependencies]
-libcrux-aead = { version = "0.0.6" }
-libcrux-ed25519 = { version = "0.0.6", features = ["rand"] }
-libcrux-hkdf = { version = "0.0.6" }
-libcrux-sha2 = { version = "0.0.6" }
-libcrux-hmac = { version = "0.0.6" }
-libcrux-traits = { version = "0.0.6" }
+libcrux-aead = { version = "0.0.10" }
+libcrux-ed25519 = { version = "0.0.10" }
+libcrux-hkdf = { version = "0.0.9" }
+libcrux-sha2 = { version = "0.0.9" }
+libcrux-hmac = { version = "0.0.9" }
+libcrux-traits = { version = "0.0.9" }
 
-openmls_traits = { workspace = true }
-openmls_memory_storage = { workspace = true }
+openmls_traits = { version = "0.5.0" }
+openmls_memory_storage = { version = "0.5.0" }
 
 rand = "0.9"
-tls_codec.workspace = true
+tls_codec = { version = "0.4.2", features = ["derive", "serde", "mls"] }
 rand_chacha = "0.9"
 
-hpke-rs = { version = "0.6.0", features = ["hazmat", "serialization"] }
-hpke-rs-crypto = { version = "0.6.0" }
-hpke-rs-libcrux = { version = "0.6.0" }
+# `draft-connolly-cfrg-hpke-mlkem` keeps X-Wing DeriveKeyPair as hpke-rs 0.6
+# computed it (unlabeled SHAKE256(ikm)). 0.8's default is the labeled
+# draft-ietf-hpke-pq derive, which gives a DIFFERENT key pair for the same
+# path secret and breaks every tree built by an 0.3.1 peer.
+hpke-rs = { version = "0.8", features = ["hazmat", "serialization", "draft-connolly-cfrg-hpke-mlkem"] }
+hpke-rs-crypto = { version = "0.8" }
+hpke-rs-libcrux = { version = "0.8" }
 
 [features]
 extensions-draft-08 = [
